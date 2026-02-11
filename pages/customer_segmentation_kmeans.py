@@ -1,92 +1,111 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+import plotly.express as px
 
-# =========================
-# CONFIG APP
-# =========================
+# ==============================
+# CONFIG PAGE
+# ==============================
 st.set_page_config(
-    page_title="Segmentation Clients",
+    page_title="Customer Segmentation – KMeans",
     layout="wide"
 )
 
-# =========================
-# SIDEBAR
-# =========================
-st.sidebar.title(" Menu")
-page = st.sidebar.radio(
-    "Navigation",
-    ["Accueil", "Customer Segmentation – KMeans"]
-)
+st.title(" Customer Segmentation – KMeans")
+st.markdown("Segmentation clients basée sur AGE et ANNUAL_INCOME")
 
-# =========================
-# PATHS
-# =========================
+# ==============================
+# PATH DU FICHIER
+# ==============================
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_PATH = BASE_DIR / "ml" / "customers_segmented.csv"
 
-# =========================
-# PAGE : ACCUEIL
-# =========================
-if page == "Accueil":
-    st.title("Dashboard – Segmentation Clients")
+# ==============================
+# VERIFICATION FICHIER
+# ==============================
+if not DATA_PATH.exists():
+    st.error(" Fichier customers_segmented.csv introuvable dans le dossier ml/")
+    st.stop()
 
-    st.markdown("""
-    ###  Objectif
-    Segmenter les clients avec **KMeans** afin d’identifier
-    des profils clients exploitables pour le marketing.
+df = pd.read_csv(DATA_PATH)
+st.success(" Fichier chargé avec succès")
 
-    ###  Pipeline
-    - Préparation des données
-    - Segmentation KMeans
-    - Analyse des clusters
-    """)
+# Nettoyage colonnes
+df.columns = df.columns.str.strip().str.upper().str.replace(" ", "_")
 
-    st.info(" Utilisez le menu à gauche pour accéder à la segmentation")
+st.write("Colonnes détectées :", df.columns.tolist())
 
-# =========================
-# PAGE : KMEANS
-# =========================
-elif page == "Customer Segmentation – KMeans":
-    st.title(" Customer Segmentation – KMeans")
+# ==============================
+# VERIFICATION COLONNES
+# ==============================
+required_cols = ["AGE", "ANNUAL_INCOME"]
 
-    # Vérification fichier
-    if not DATA_PATH.exists():
-        st.error(" Fichier customers_segmented.csv introuvable")
-        st.stop()
+if not all(col in df.columns for col in required_cols):
+    st.error(" Colonnes requises manquantes")
+    st.stop()
 
-    # Chargement données
-    df = pd.read_csv(DATA_PATH)
+# ==============================
+# PREPARATION DONNEES
+# ==============================
+X = df[required_cols]
 
-    # Normalisation des noms de colonnes
-    df.columns = df.columns.str.lower()
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-    # Détection automatique du cluster
-    cluster_col = [c for c in df.columns if "cluster" in c]
-    if not cluster_col:
-        st.error(" Colonne cluster introuvable")
-        st.stop()
-    cluster_col = cluster_col[0]
+# ==============================
+# CHOIX DU NOMBRE DE CLUSTERS
+# ==============================
+k = st.slider("Nombre de clusters", 2, 8, 4)
 
-    # Aperçu
-    st.subheader(" Aperçu des données")
-    st.dataframe(df.head())
+kmeans = KMeans(n_clusters=k, random_state=42)
+clusters = kmeans.fit_predict(X_scaled)
 
-    # Colonnes numériques
-    numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    if cluster_col in numeric_cols:
-        numeric_cols.remove(cluster_col)
+df["KMEANS_CLUSTER"] = clusters
 
-    # Profils moyens
-    profiles = (
-        df.groupby(cluster_col)[numeric_cols]
-          .mean()
-          .round(1)
-    )
+# ==============================
+# METRIQUE SILHOUETTE
+# ==============================
+score = silhouette_score(X_scaled, clusters)
+st.metric("Silhouette Score", round(score, 3))
 
-    st.subheader(" Profils moyens par cluster")
-    st.dataframe(profiles)
+# ==============================
+# DISTRIBUTION DES CLUSTERS
+# ==============================
+st.subheader(" Distribution des clusters")
+cluster_counts = df["KMEANS_CLUSTER"].value_counts().sort_index()
+st.bar_chart(cluster_counts)
 
-    # Distribution
-    st.subheader(" Distribution des clusters")
-    st.bar_chart(df[cluster_col].value_counts().sort_index())
+# ==============================
+# PROFILS MOYENS
+# ==============================
+st.subheader(" Profils moyens par cluster")
+
+profiles = (
+    df.groupby("KMEANS_CLUSTER")[required_cols]
+    .mean()
+    .round(1)
+)
+
+st.dataframe(profiles)
+
+# ==============================
+# VISUALISATION
+# ==============================
+st.subheader(" Visualisation des clusters")
+
+fig = px.scatter(
+    df,
+    x="ANNUAL_INCOME",
+    y="AGE",
+    color="KMEANS_CLUSTER",
+    title="Segmentation Clients KMeans",
+    width=800,
+    height=600
+)
+
+st.plotly_chart(fig)
+
+st.success(" Segmentation terminée avec succès")

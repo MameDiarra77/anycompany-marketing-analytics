@@ -1,35 +1,63 @@
 import streamlit as st
 import pandas as pd
-from pathlib import Path
+import snowflake.connector
 
-st.title("Marketing ROI")
+st.title("Marketing ROI Dashboard")
+st.write("Analyse globale des performances financières marketing")
 
-# Base du projet
-BASE_DIR = Path(__file__).resolve().parents[1]
-
-#  UTILISE UN FICHIER QUI EXISTE
-DATA_PATH = BASE_DIR / "ml" / "customers_segmented.csv"
-
-# Vérification
-if not DATA_PATH.exists():
-    st.error("Fichier customers_segmented.csv introuvable")
+# Connexion Snowflake
+try:
+    conn = snowflake.connector.connect(
+        account=st.secrets["snowflake"]["account"],
+        user=st.secrets["snowflake"]["user"],
+        password=st.secrets["snowflake"]["password"],
+        role=st.secrets["snowflake"]["role"],
+        warehouse=st.secrets["snowflake"]["warehouse"],
+        database=st.secrets["snowflake"]["database"],
+        schema=st.secrets["snowflake"]["schema"],
+    )
+    st.success(" Connexion Snowflake réussie")
+except Exception as e:
+    st.error(f" Connexion Snowflake échouée : {e}")
     st.stop()
 
-# Chargement
-df = pd.read_csv(DATA_PATH)
-df.columns = df.columns.str.lower()
+# Requête SQL
+query = """
+SELECT 
+    SUM(CASE WHEN TRANSACTION_TYPE = 'Revenue' THEN AMOUNT ELSE 0 END) AS TOTAL_REVENUE,
+    SUM(CASE WHEN TRANSACTION_TYPE = 'Expense' THEN AMOUNT ELSE 0 END) AS TOTAL_COST
+FROM ANYCOMPANY_LAB.SILVER.FINANCIAL_TRANSACTIONS_CLEAN
+"""
 
-st.subheader(" Aperçu des données")
-st.dataframe(df.head())
-
-# Détection automatique du cluster
-cluster_col = [c for c in df.columns if "cluster" in c]
-if not cluster_col:
-    st.error(" Colonne cluster introuvable")
+try:
+    df = pd.read_sql(query, conn)
+except Exception as e:
+    st.error(f" Erreur SQL : {e}")
     st.stop()
 
-cluster_col = cluster_col[0]
+# Récupération des valeurs
+revenue = df["TOTAL_REVENUE"][0]
+cost = df["TOTAL_COST"][0]
 
-# Exemple simple de KPI ROI par cluster
-st.subheader(" Répartition des clients par cluster")
-st.bar_chart(df[cluster_col].value_counts().sort_index())
+# Calcul ROI sécurisé
+if cost and cost != 0:
+    roi = ((revenue - cost) / cost) * 100
+else:
+    roi = 0
+
+# KPIs
+st.subheader("KPIs Globaux")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.metric("Revenu total", f"{revenue:,.0f} €")
+
+with col2:
+    st.metric("Coût total", f"{cost:,.0f} €")
+
+with col3:
+    st.metric("ROI Global", f"{roi:.1f}%")
+
+# Fermeture connexion
+conn.close()

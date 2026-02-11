@@ -1,49 +1,82 @@
 import streamlit as st
 import pandas as pd
-from pathlib import Path
+import snowflake.connector
 
-# =====================
-# CONFIG
-# =====================
-st.title(" Dashboard des Avis / Propension à l’achat")
+st.title(" Promotion Analysis Dashboard")
+st.markdown("Analyse des performances des promotions")
 
-BASE_PATH = Path(__file__).resolve().parents[1]
+# =============================
+# CONNEXION SNOWFLAKE
+# =============================
 
-# =====================
-# CHARGEMENT DES DONNÉES
-# =====================
-df_propensity = pd.read_csv(
-    BASE_PATH / "customers_propensity_scores.csv"
-)
+try:
+    conn = snowflake.connector.connect(
+        account="IQB68372.us-west-2",
+        user="MAMEDIARRA144",
+        password="AissatouNgom1994@",
+        warehouse="ANYCOMPANY_WH",
+        database="ANYCOMPANY_LAB",
+        schema="SILVER"
+    )
+    st.success(" Connexion Snowflake réussie")
 
-# Normalisation
-df_propensity.columns = df_propensity.columns.str.lower()
+except Exception as e:
+    st.error(f" Connexion échouée : {e}")
+    st.stop()
 
-# =====================
-# CONTENU DASHBOARD
-# =====================
-if len(df_propensity) > 0:
+# =============================
+# REQUÊTE SQL
+# =============================
 
-    st.subheader(" Distribution du score de propension")
-    st.bar_chart(df_propensity["propensity_score"])
+query = """
+SELECT *
+FROM ANYCOMPANY_LAB.SILVER.PROMOTIONS_CLEAN
+"""
 
-    high_prop = (df_propensity["propensity_score"] > 0.7).mean() * 100
-    st.metric(" Clients à forte propension (> 0.7)", f"{high_prop:.1f}%")
+try:
+    df = pd.read_sql(query, conn)
+    st.success(" Données chargées avec succès")
 
-    st.subheader(" Répartition par segment")
-    segment_counts = df_propensity["propensity_segment"].value_counts()
-    st.bar_chart(segment_counts)
+except Exception as e:
+    st.error(f" Erreur SQL : {e}")
+    st.stop()
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Score moyen", f"{df_propensity['propensity_score'].mean():.2f}")
-    with col2:
-        st.metric("Score minimum", f"{df_propensity['propensity_score'].min():.2f}")
-    with col3:
-        st.metric("Score maximum", f"{df_propensity['propensity_score'].max():.2f}")
+# =============================
+# NETTOYAGE COLONNES
+# =============================
 
-    st.subheader(" Aperçu des données")
-    st.dataframe(df_propensity.head(20), use_container_width=True)
+df.columns = df.columns.str.upper()
 
-else:
-    st.error(" Aucune donnée disponible")
+st.write("Colonnes disponibles :", df.columns.tolist())
+
+# =============================
+# KPI
+# =============================
+
+st.subheader(" KPIs Promotions")
+
+col1, col2, col3 = st.columns(3)
+
+if "REVENUE" in df.columns:
+    col1.metric("Total Revenue", f"{df['REVENUE'].sum():,.0f}")
+
+if "DISCOUNT_PERCENT" in df.columns:
+    col2.metric("Average Discount (%)", round(df["DISCOUNT_PERCENT"].mean(), 2))
+
+if "CONVERSION_RATE" in df.columns:
+    col3.metric("Average Conversion Rate", round(df["CONVERSION_RATE"].mean(), 3))
+
+# =============================
+# TABLEAU
+# =============================
+
+st.subheader(" Détail des promotions")
+st.dataframe(df)
+
+# =============================
+# VISUALISATION
+# =============================
+
+if "DISCOUNT_PERCENT" in df.columns and "REVENUE" in df.columns:
+    st.subheader(" Revenue vs Discount")
+    st.scatter_chart(df, x="DISCOUNT_PERCENT", y="REVENUE")
